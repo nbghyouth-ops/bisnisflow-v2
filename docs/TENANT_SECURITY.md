@@ -1,0 +1,2 @@
+# Keamanan tenant
+Lapisan: (1) sesi → (2) keanggotaan aktif + status workspace + email terverifikasi per request → (3) izin peran per route + modul aktif → (4) RLS di database. Tes: akses lintas-tenant via header workspace palsu = 403; berkas lintas-tenant 404; SELECT/INSERT/UPDATE/DELETE lintas-tenant ditolak di DB; konteks kosong = 0 baris; role runtime tanpa BYPASSRLS. Undangan sekali pakai (hash token, 7 hari), perlindungan owner terakhir, pemisahan tugas persetujuan PO. Platform admin & break-glass **belum diimplementasikan** (tidak ada superadmin otomatis).

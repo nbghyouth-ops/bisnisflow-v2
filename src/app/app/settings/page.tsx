@@ -1,0 +1,66 @@
+"use client";
+import Link from "next/link";
+import { useState } from "react";
+import { api, Btn, Card, ErrorBox, Field, FormModal, Help, Loading, PageHeader, Status, Table, Tabs, fdate, todayStr, useAction, useApi, useWs } from "@/components/ui";
+
+const MODULES: Record<string, string> = { sales: "Penjualan & POS", inventory: "Produk & Persediaan", purchasing: "Pembelian", crm: "Pelanggan/CRM", hr: "Karyawan & HR", tasks: "Tugas & Tim", bookings: "Booking & Reservasi", operations: "Operasional", marketing: "Pemasaran", projects: "Proyek", assets: "Aset & Dokumen", cash: "Kontrol Kas" };
+type Rule = { id: string; name: string; version: number; status: string; definition: { percent: number; minQty?: number; minSubtotal?: number; customerGroup?: string }; effective_from: string | null };
+
+export default function Settings() {
+  const act = useAction();
+  const { ws, allowed } = useWs();
+  const [tab, setTab] = useState("profile");
+  const [modal, setModal] = useState<string | null>(null);
+  const [dry, setDry] = useState<string | null>(null);
+  const biz = useApi<{ businesses: { id: string; name: string; legal_name: string | null; address: string | null; phone: string | null; email: string | null; tax_id: string | null }[]; branches: { id: string; name: string; code: string }[]; warehouses: { id: string; name: string; code: string; is_active: boolean }[] }>("businesses");
+  const info = useApi<{ workspace: { enabled_modules: string[]; timezone: string; currency: string }; template: { workflows: string[]; checklist: { opening: string[]; closing: string[] }; questions: string[] } }>("workspace");
+  const tax = useApi<{ items: { id: string; name: string; rate: string; effective_from: string; is_default: boolean }[] }>(tab === "tax" ? "tax-rates" : null);
+  const rules = useApi<{ items: Rule[] }>(tab === "rules" ? "rules" : null);
+  const prods = useApi<{ items: { id: string; name: string }[] }>(tab === "rules" ? "products?limit=100" : null);
+  const sessions = useApi<{ items: { id: string; created_at: string; expires_at: string; user_agent: string | null; is_current: boolean }[] }>(tab === "sessions" ? "auth/sessions" : null);
+  const w = allowed["business:write"];
+  const b = biz.data?.businesses[0];
+  const mods = info.data?.workspace.enabled_modules ?? [];
+  return (
+    <>
+      <PageHeader title="Pengaturan Bisnis" desc={`${ws.name} · ${ws.templateName} · ${ws.currency}`} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: "profile", label: "Profil" }, { id: "org", label: "Cabang & gudang" }, { id: "modules", label: "Modul" }, { id: "tax", label: "Pajak" }, { id: "rules", label: "Aturan diskon" }, { id: "template", label: "Template" }, { id: "sessions", label: "Sesi akun" }]} />
+      {biz.loading && <Loading />}{biz.error && <ErrorBox message={biz.error} />}
+      {tab === "profile" && b && <Card title="Profil bisnis" actions={w && <Btn small onClick={() => setModal("profile")}>Ubah</Btn>}>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">{([["Nama", b.name], ["Nama legal", b.legal_name], ["Alamat", b.address], ["Telepon", b.phone], ["Email", b.email], ["NPWP/ID pajak", b.tax_id]] as const).map(([k, v]) => <div key={k}><dt className="text-muted">{k}</dt><dd>{v ?? "–"}</dd></div>)}</dl>
+        <p className="mt-4 text-sm text-muted">Data master lain: <Link className="underline" href="/app/m/business">Satuan & kurs mata uang</Link>. Mata uang dan template tidak dapat diubah setelah ada transaksi.</p></Card>}
+      {tab === "org" && biz.data && <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Cabang" actions={w && <Btn small onClick={() => setModal("branch")}>+ Cabang</Btn>}><Table caption="Cabang" rows={biz.data.branches} cols={[{ key: "code", label: "Kode" }, { key: "name", label: "Nama" }]} /></Card>
+        <Card title="Gudang" actions={w && <Btn small onClick={() => setModal("wh")}>+ Gudang</Btn>}><Table caption="Gudang" rows={biz.data.warehouses} cols={[{ key: "code", label: "Kode" }, { key: "name", label: "Nama" }, { key: "is_active", label: "Status", render: (r) => <Status value={r.is_active ? "active" : "suspended"} /> }]} /></Card></div>}
+      {tab === "modules" && <Card title="Modul aktif"><Help><p>Modul yang dimatikan disembunyikan dan API-nya ditolak. Data tidak dihapus.</p></Help>
+        <div className="grid gap-2 sm:grid-cols-2">{Object.entries(MODULES).map(([k, label]) => <label key={k} className="flex min-h-11 items-center gap-3 rounded-lg border border-line px-3"><input type="checkbox" className="h-5 w-5" disabled={!w} checked={mods.includes(k)} onChange={async (e) => { const next = e.target.checked ? [...mods, k] : mods.filter((x) => x !== k); if (await act(() => api("workspace", { method: "PATCH", body: { enabledModules: next } }), "Modul diperbarui")) { info.reload(); setTimeout(() => location.reload(), 400); } }} />{label}</label>)}</div></Card>}
+      {tab === "tax" && <Card title="Tarif pajak (berlaku mulai tanggal)" actions={w && <Btn small onClick={() => setModal("tax")}>+ Tarif baru</Btn>}><p className="mb-3 text-sm text-muted">Tarif lama tidak diubah — transaksi historis tetap memakai tarif yang berlaku saat itu.</p>{tax.data && <Table caption="Pajak" rows={tax.data.items} cols={[{ key: "name", label: "Nama" }, { key: "rate", label: "Tarif %", num: true, render: (r) => Number(r.rate) }, { key: "effective_from", label: "Berlaku mulai", render: (r) => fdate(r.effective_from) }, { key: "is_default", label: "Default", render: (r) => (r.is_default ? "Ya" : "") }]} />}</Card>}
+      {tab === "rules" && <Card title="Aturan diskon / harga bertingkat" actions={w && <><Btn small onClick={() => setModal("rule")}>+ Aturan</Btn><Btn small variant="secondary" onClick={() => setModal("dry")}>Simulasi</Btn></>}>
+        <Help><p>Aturan deklaratif (tanpa kode): persen diskon, minimum qty/subtotal, produk, grup pelanggan. Dipilih diskon terbaik per baris (tidak ditumpuk). Aturan harus disetujui (diaktifkan) oleh approver. Edit = versi baru.</p></Help>
+        {dry && <p role="status" className="mb-3 rounded-lg bg-cream p-3 text-sm">{dry}</p>}
+        {rules.data && <Table caption="Aturan" empty="Belum ada aturan." rows={rules.data.items} cols={[{ key: "name", label: "Nama" }, { key: "version", label: "Versi", num: true }, { key: "d", label: "Ketentuan", render: (r) => `${r.definition.percent}%${r.definition.minQty ? ` · min qty ${r.definition.minQty}` : ""}${r.definition.minSubtotal ? ` · min subtotal ${r.definition.minSubtotal}` : ""}${r.definition.customerGroup ? ` · grup ${r.definition.customerGroup}` : ""}` }, { key: "status", label: "Status", render: (r) => <Status value={r.status} /> }, { key: "a", label: "", render: (r) => allowed["business:approve"] && r.status !== "retired" && <Btn small variant="secondary" onClick={async () => { if (await act(() => api(`rules/${r.id}/status`, { body: { status: r.status === "draft" ? "active" : "retired" } }), "Status aturan diperbarui")) rules.reload(); }}>{r.status === "draft" ? "Aktifkan" : "Pensiunkan"}</Btn> }]} />}</Card>}
+      {tab === "sessions" && <Card title="Sesi masuk akun" actions={<Btn small variant="secondary" onClick={() => sessions.reload()}>Muat ulang</Btn>}>
+        <p className="mb-3 text-sm text-muted">Perangkat yang masih memiliki sesi login. Cabut sesi yang tidak Anda kenali; perubahan berlaku pada permintaan berikutnya dari perangkat tersebut.</p>
+        {sessions.loading && <p className="text-sm text-muted">Memuat sesi…</p>}
+        {sessions.error && <ErrorBox message={sessions.error} />}
+        {sessions.data && sessions.data.items.length === 0 && <p className="text-sm text-muted">Tidak ada sesi aktif.</p>}
+        <ul className="divide-y divide-line">{sessions.data?.items.map((s) => <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="min-w-0 text-sm"><div className="flex flex-wrap items-center gap-2"><strong>{s.is_current ? "Perangkat ini" : "Perangkat lain"}</strong>{s.is_current && <Status value="active" />}</div>
+            <p className="break-words text-xs text-muted">{s.user_agent || "Perangkat tidak diketahui"}</p>
+            <p className="text-xs text-muted">Masuk: {new Date(s.created_at).toLocaleString("id-ID")} · Berakhir: {new Date(s.expires_at).toLocaleString("id-ID")}</p></div>
+          {!s.is_current && <Btn small variant="danger" onClick={async () => { if (!window.confirm("Cabut sesi perangkat ini? Perangkat tersebut harus login ulang.")) return; if (await act(() => api(`auth/sessions/${s.id}/revoke`, { body: {} }), "Sesi perangkat dicabut")) sessions.reload(); }}>Cabut sesi</Btn>}
+        </li>)}</ul>
+      </Card>}
+      {tab === "template" && info.data && <div className="grid gap-4 lg:grid-cols-2">
+        <Card title={`Workflow ${ws.templateName}`}><ul className="list-disc pl-5 text-sm">{info.data.template.workflows.map((x) => <li key={x}>{x}</li>)}</ul><p className="mt-3 text-sm"><Link className="underline" href="/app/m/workflow">Buka workflow khusus →</Link></p></Card>
+        <Card title="Checklist operasional yang disarankan"><p className="text-sm font-semibold">Buka</p><ul className="mb-2 list-disc pl-5 text-sm">{info.data.template.checklist.opening.map((x) => <li key={x}>{x}</li>)}</ul><p className="text-sm font-semibold">Tutup</p><ul className="list-disc pl-5 text-sm">{info.data.template.checklist.closing.map((x) => <li key={x}>{x}</li>)}</ul><p className="mt-2 text-xs text-muted">Buat sebagai checklist di Operasional agar dapat dicentang & diaudit.</p></Card></div>}
+
+      {modal === "profile" && b && <FormModal wide title="Profil bisnis" onClose={() => setModal(null)} fields={[{ key: "name", label: "Nama", required: true, def: b.name }, { key: "legalName", label: "Nama legal", def: b.legal_name ?? "" }, { key: "address", label: "Alamat", def: b.address ?? "" }, { key: "phone", label: "Telepon", def: b.phone ?? "" }, { key: "email", label: "Email", type: "email", def: b.email ?? "" }, { key: "taxId", label: "NPWP/ID pajak", def: b.tax_id ?? "" }]} onSubmit={async (v) => { await api(`businesses/${b.id}`, { method: "PATCH", body: { name: v.name, legalName: v.legalName || null, address: v.address || null, phone: v.phone || null, email: v.email || "", taxId: v.taxId || null } }); biz.reload(); }} />}
+      {modal === "branch" && <FormModal title="Cabang baru" onClose={() => setModal(null)} fields={[{ key: "name", label: "Nama", required: true }, { key: "code", label: "Kode (2–20, huruf/angka)", required: true }, { key: "address", label: "Alamat" }]} onSubmit={async (v) => { await api("branches", { body: { name: v.name, code: v.code, address: v.address || null } }); biz.reload(); }} />}
+      {modal === "wh" && <FormModal title="Gudang baru" onClose={() => setModal(null)} fields={[{ key: "name", label: "Nama", required: true }, { key: "code", label: "Kode", required: true }, { key: "branchId", label: "Cabang", type: "select", options: (biz.data?.branches ?? []).map((x) => ({ value: x.id, label: x.name })) }]} onSubmit={async (v) => { await api("warehouses", { body: { name: v.name, code: v.code, branchId: v.branchId || null } }); biz.reload(); }} />}
+      {modal === "tax" && <FormModal title="Tarif pajak baru" onClose={() => setModal(null)} fields={[{ key: "name", label: "Nama", required: true, def: "PPN" }, { key: "rate", label: "Tarif (%)", type: "number", required: true }, { key: "effectiveFrom", label: "Berlaku mulai", type: "date", required: true, def: todayStr() }]} onSubmit={async (v) => { await api("tax-rates", { body: { name: v.name, rate: Number(v.rate), effectiveFrom: v.effectiveFrom, isDefault: true } }); tax.reload(); }} />}
+      {modal === "rule" && <FormModal wide title="Aturan diskon baru (draft)" onClose={() => setModal(null)} fields={[{ key: "name", label: "Nama aturan", required: true }, { key: "percent", label: "Diskon (%)", type: "number", required: true }, { key: "minQty", label: "Minimum qty" }, { key: "minSubtotal", label: "Minimum subtotal pesanan" }, { key: "productId", label: "Produk (opsional)", type: "select", options: (prods.data?.items ?? []).map((p) => ({ value: p.id, label: p.name })) }, { key: "customerGroup", label: "Grup pelanggan (opsional)" }]} onSubmit={async (v) => { await api("rules", { body: { name: v.name, definition: { percent: Number(v.percent), ...(v.minQty ? { minQty: Number(v.minQty) } : {}), ...(v.minSubtotal ? { minSubtotal: Number(v.minSubtotal) } : {}), ...(v.productId ? { productId: v.productId } : {}), ...(v.customerGroup ? { customerGroup: v.customerGroup } : {}) } } }); rules.reload(); }} />}
+      {modal === "dry" && <FormModal title="Simulasi aturan (tanpa menyimpan)" onClose={() => setModal(null)} fields={[{ key: "productId", label: "Produk", type: "select", options: (prods.data?.items ?? []).map((p) => ({ value: p.id, label: p.name })), required: true }, { key: "qty", label: "Qty", type: "number", required: true, def: "1" }, { key: "customerGroup", label: "Grup pelanggan" }]} onSubmit={async (v) => { const r = await api("rules/dry-run", { body: { productId: v.productId, qty: Number(v.qty), customerGroup: v.customerGroup || undefined } }); setDry(`Bruto ${r.gross} → diskon ${r.percent}% (${r.discount})${r.rule ? ` oleh aturan "${r.rule}"` : " — tidak ada aturan aktif yang cocok"}`); }} />}
+    </>
+  );
+}
