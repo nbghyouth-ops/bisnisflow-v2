@@ -1,246 +1,162 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useToasts } from "@/lib/client";
 
-/* ───────── API client ───────── */
-export class ApiErr extends Error {
-  constructor(public status: number, public title: string, message: string, public errors?: { path: string; message: string }[]) {
-    super(message);
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; idem?: boolean } = {}): Promise<T> {
-  const res = await fetch(`/api/v1/${path}`, {
-    method: opts.method ?? (opts.body !== undefined ? "POST" : "GET"),
-    headers: { ...(opts.body !== undefined ? { "content-type": "application/json" } : {}), ...(opts.idem ? { "idempotency-key": crypto.randomUUID() } : {}) },
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
-  const ct = res.headers.get("content-type") ?? "";
-  const data = ct.includes("json") ? await res.json() : await res.text();
-  if (!res.ok) {
-    if (res.status === 401 && typeof window !== "undefined" && !location.pathname.startsWith("/login")) location.href = "/login";
-    throw new ApiErr(res.status, data?.title ?? "error", data?.detail ?? "Terjadi kesalahan", data?.errors);
-  }
-  const devOtp = res.headers.get("x-dev-otp");
-  if (devOtp && data && typeof data === "object") {
-    return { ...data, devCode: devOtp, devNote: "[DEV MODE - Ganti dengan SMTP di produksi]" } as T;
-  }
-  return data as T;
-}
-
-export function errText(e: unknown) {
-  if (e instanceof ApiErr) return e.errors?.length ? `${e.message}: ${e.errors.map((x) => `${x.path} ${x.message}`).join("; ")}` : e.message;
-  return e instanceof Error ? e.message : "Terjadi kesalahan";
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function useApi<T = any>(path: string | null) {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(!!path);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    if (!path) return;
-    let live = true;
-    setLoading(true);
-    api<T>(path)
-      .then((d) => { if (live) { setData(d); setError(null); } })
-      .catch((e) => { if (live) setError(errText(e)); })
-      .finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
-  }, [path, tick]);
-  const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, loading, reload };
-}
-
-/* ───────── Workspace context ───────── */
-export type WsCtx = {
-  user: { id: string; name: string; email: string };
-  ws: { id: string; name: string; role: string; template: string; templateName: string; uiMode: string; currency: string; locale: string; enabledModules: string[]; terms: { customer: string; product: string; order: string } };
-  allowed: Record<string, boolean>;
-  memberships: { id: string; name: string; role: string }[];
-};
-export const WsContext = createContext<WsCtx | null>(null);
-export const useWs = () => {
-  const c = useContext(WsContext);
-  if (!c) throw new Error("WsContext missing");
-  return c;
+type Variant = "primary" | "secondary" | "ghost" | "danger";
+const V: Record<Variant, string> = {
+  primary: "bg-primary-deep text-white hover:bg-[#136560] disabled:bg-ink-2",
+  secondary: "bg-white text-ink border border-line hover:bg-primary-bg disabled:text-ink-2",
+  ghost: "text-primary-deep hover:bg-primary-bg",
+  danger: "bg-white text-[#B3261E] border border-[#E9B7B2] hover:bg-[#FDEDEB]",
 };
 
-export function useMoney() {
-  const { ws } = useWs();
-  return useCallback((v: unknown) => {
-    const n = Number(v ?? 0);
-    const zero = ["IDR", "JPY", "KRW", "VND"].includes(ws.currency);
-    return new Intl.NumberFormat(ws.locale, { style: "currency", currency: ws.currency, minimumFractionDigits: zero ? 0 : 2, maximumFractionDigits: zero ? 0 : 2 }).format(n);
-  }, [ws.currency, ws.locale]);
-}
-export const num = (v: unknown, d = 2) => new Intl.NumberFormat("id-ID", { maximumFractionDigits: d }).format(Number(v ?? 0));
-export const fdate = (v: unknown) => (v ? String(v).slice(0, 10) : "–");
-export const fdt = (v: unknown) => (v ? new Date(String(v)).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "–");
-export const todayStr = () => new Date().toLocaleDateString("en-CA");
-
-/* ───────── Toast ───────── */
-const ToastCtx = createContext<(m: string, kind?: "ok" | "bad") => void>(() => {});
-export const useToast = () => useContext(ToastCtx);
-export function ToastProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<{ id: number; m: string; kind: string }[]>([]);
-  const push = useCallback((m: string, kind: "ok" | "bad" = "ok") => {
-    const id = Date.now() + Math.random();
-    setItems((s) => [...s, { id, m, kind }]);
-    setTimeout(() => setItems((s) => s.filter((x) => x.id !== id)), 5000);
-  }, []);
+export function Button({ variant = "primary", loading, className = "", children, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }) {
   return (
-    <ToastCtx.Provider value={push}>
+    <button {...p} disabled={p.disabled || loading} type={p.type ?? "button"}
+      className={`inline-flex min-h-[40px] items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${V[variant]} ${className}`}>
+      {loading && <span aria-hidden className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex max-w-sm flex-col gap-2 no-print" role="status" aria-live="polite">
-        {items.map((t) => (
-          <div key={t.id} className={`fade-in card px-4 py-3 text-sm ${t.kind === "bad" ? "border-red-300 bg-red-50 text-red-900" : "border-green-300 bg-green-50 text-green-900"}`}>
-            <span aria-hidden="true">{t.kind === "bad" ? "✕ " : "✓ "}</span>{t.m}
-          </div>
-        ))}
-      </div>
-    </ToastCtx.Provider>
+    </button>
   );
 }
 
-/* ───────── Primitives ───────── */
-export function Btn({ variant = "primary", small, className = "", ...p }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger"; small?: boolean }) {
-  return <button type="button" {...p} className={`btn btn-${variant} ${small ? "btn-sm" : ""} ${className}`} />;
-}
-export function Card({ children, className = "", title, actions }: { children: ReactNode; className?: string; title?: ReactNode; actions?: ReactNode }) {
+export function Card({ title, desc, actions, children, className = "" }: { title?: string; desc?: string; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={`card p-4 sm:p-5 ${className}`}>
+    <section className={`rounded-[18px] border border-line bg-white p-5 shadow-card ${className}`}>
       {(title || actions) && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          {title && <h2 className="text-base font-semibold">{title}</h2>}
-          {actions}
-        </div>
+        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>{title && <h2 className="text-[17px] font-semibold text-ink">{title}</h2>}{desc && <p className="mt-0.5 text-[13px] text-ink-2">{desc}</p>}</div>
+          {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+        </header>
       )}
       {children}
     </section>
   );
 }
-export function PageHeader({ title, desc, actions }: { title: string; desc?: string; actions?: ReactNode }) {
+
+export function PageHeader({ label, title, desc, actions }: { label: string; title: string; desc?: string; actions?: ReactNode }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-4" data-tour="page-header">
       <div>
-        <h1 className="font-display text-3xl leading-tight">{title}</h1>
-        {desc && <p className="mt-1 max-w-2xl text-sm text-muted">{desc}</p>}
+        <p className="text-xs font-semibold uppercase tracking-wider text-primary-deep">{label}</p>
+        <h1 className="mt-1 text-[26px] font-bold leading-tight text-ink md:text-[30px]">{title}</h1>
+        {desc && <p className="mt-1 max-w-2xl text-sm text-ink-2">{desc}</p>}
       </div>
-      <div className="flex flex-wrap gap-2">{actions}</div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
-export function Badge({ children, tone }: { children: ReactNode; tone?: "ok" | "warn" | "bad" }) {
-  return <span className={`badge ${tone ? `badge-${tone}` : ""}`}>{children}</span>;
+
+export function Kpi({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: "good" | "bad" }) {
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4 shadow-card">
+      <p className="text-[13px] font-medium text-ink-2">{label}</p>
+      <p className={`kpi-value mt-1 text-[26px] font-bold leading-tight ${tone === "bad" ? "text-[#B3261E]" : "text-ink"}`}>{value}</p>
+      {hint && <p className="mt-1 text-xs text-ink-2">{hint}</p>}
+    </div>
+  );
 }
-const STATUS_TONE: Record<string, "ok" | "warn" | "bad"> = { paid: "ok", received: "ok", completed: "ok", done: "ok", active: "ok", approved: "ok", published: "ok", closed: "warn", delivered: "ok", accepted: "ok", pass: "ok", present: "ok", available: "ok",
-  draft: "warn", submitted: "warn", pending: "warn", partially_paid: "warn", partially_received: "warn", invoiced: "warn", todo: "warn", review: "warn", open: "warn", unpaid: "warn", doing: "warn",
-  cancelled: "bad", rejected: "bad", failed: "bad", fail: "bad", dead_letter: "bad", reversed: "bad", returned: "bad", absent: "bad", suspended: "bad", closed_with_variance: "bad" };
-export function Status({ value }: { value?: string | null }) {
-  if (!value) return <>–</>;
-  return <Badge tone={STATUS_TONE[value]}>{value.replace(/_/g, " ")}</Badge>;
+
+const TONES: Record<string, string> = {
+  good: "bg-[#E3F5EA] text-[#17653A]", warn: "bg-cream text-[#7A5B00]", bad: "bg-[#FDEDEB] text-[#A12A1F]", info: "bg-[#E6F2FB] text-[#1D5F8E]", neutral: "bg-surface text-ink-2",
+};
+const STATUS_TONE: Record<string, string> = {
+  paid: "good", posted: "good", active: "good", done: "good", completed: "good", received: "good", confirmed: "info", approved: "good", closed: "neutral",
+  partial: "warn", pending_approval: "warn", ordered: "info", open: "info", in_progress: "info", draft: "neutral", todo: "neutral", planning: "neutral",
+  unpaid: "warn", rejected: "bad", reversed: "bad", cancelled: "bad", revoked: "bad", blocked: "bad", urgent: "bad", high: "warn", restricted: "warn", archived: "neutral", inactive: "neutral",
+};
+export function Badge({ children, tone, status }: { children?: ReactNode; tone?: keyof typeof TONES; status?: string }) {
+  const t = tone ?? (status ? STATUS_TONE[status] : undefined) ?? "neutral";
+  return <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${TONES[t]}`}>{children ?? status?.replace(/_/g, " ")}</span>;
 }
+
 export function Empty({ title, hint, action }: { title: string; hint?: string; action?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-line bg-cream-light px-4 py-10 text-center">
-      <p className="font-semibold">{title}</p>
-      {hint && <p className="mx-auto mt-1 max-w-md text-sm text-muted">{hint}</p>}
-      {action && <div className="mt-4">{action}</div>}
+    <div className="rounded-2xl border border-dashed border-line bg-white px-6 py-10 text-center">
+      <p className="text-base font-semibold text-ink">{title}</p>
+      {hint && <p className="mx-auto mt-1 max-w-md text-sm text-ink-2">{hint}</p>}
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
+}
+
+export function Loading({ text = "Memuat data…" }: { text?: string }) {
+  return <p role="status" className="py-8 text-center text-sm text-ink-2">{text}</p>;
 }
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-      {message} {onRetry && <button className="ml-2 underline" onClick={onRetry}>Coba lagi</button>}
-    </div>
-  );
-}
-export function Loading() {
-  return <p className="py-8 text-center text-sm text-muted" role="status">Memuat data…</p>;
-}
-export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: string; tone?: "bad" }) {
-  return (
-    <div className="card p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone === "bad" ? "text-red-800" : ""}`}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#E9B7B2] bg-[#FDEDEB] px-4 py-3 text-sm text-[#7F1D14]">
+      <span>{message}</span>{onRetry && <Button variant="secondary" onClick={onRetry}>Coba lagi</Button>}
     </div>
   );
 }
 
-export function Field({ label, hint, error, children, htmlFor }: { label: string; hint?: string; error?: string; children: ReactNode; htmlFor?: string }) {
+export function Field({ label, error, help, children, className = "" }: { label: string; error?: string; help?: string; children: (id: string, describedBy?: string) => ReactNode; className?: string }) {
+  const id = useId();
+  const d = error ? `${id}-e` : help ? `${id}-h` : undefined;
   return (
-    <div className="space-y-1">
-      <label htmlFor={htmlFor} className="block text-sm font-medium">{label}</label>
-      {children}
-      {hint && <p className="text-xs text-muted">{hint}</p>}
-      {error && <p className="text-xs text-red-800" role="alert">{error}</p>}
+    <div className={className}>
+      <label htmlFor={id} className="mb-1 block text-[13px] font-semibold text-ink">{label}</label>
+      {children(id, d)}
+      {error ? <p id={`${id}-e`} role="alert" className="mt-1 text-xs text-[#A12A1F]">{error}</p> : help ? <p id={`${id}-h`} className="mt-1 text-xs text-ink-2">{help}</p> : null}
     </div>
   );
 }
-
-export type Col<T> = { key: string; label: string; num?: boolean; render?: (r: T) => ReactNode };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function Table<T extends Record<string, any>>({ cols, rows, empty, caption, onRow }: { cols: Col<T>[]; rows: T[]; empty?: string; caption: string; onRow?: (r: T) => void }) {
-  if (!rows.length) return <Empty title={empty ?? "Belum ada data"} />;
+export function TextField({ label, value, onChange, type = "text", error, help, ...rest }: { label: string; value: string; onChange: (v: string) => void; type?: string; error?: string; help?: string } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value">) {
+  return <Field label={label} error={error} help={help}>{(id, d) => <input id={id} aria-describedby={d} aria-invalid={!!error} className="field-input" type={type} value={value} onChange={(e) => onChange(e.target.value)} {...rest} />}</Field>;
+}
+export function SelectField({ label, value, onChange, options, error, placeholder }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; error?: string; placeholder?: string }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
-      <table className="t">
-        <caption className="sr-only">{caption}</caption>
-        <thead><tr>{cols.map((c) => <th key={c.key} scope="col" className={c.num ? "num" : ""}>{c.label}</th>)}</tr></thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.id ?? i} className={onRow ? "cursor-pointer" : ""} onClick={onRow ? () => onRow(r) : undefined}>
-              {cols.map((c) => <td key={c.key} className={c.num ? "num" : ""}>{c.render ? c.render(r) : String(r[c.key] ?? "–")}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Field label={label} error={error}>{(id, d) => (
+      <select id={id} aria-describedby={d} className="field-input" value={value} onChange={(e) => onChange(e.target.value)}>
+        {placeholder !== undefined && <option value="">{placeholder}</option>}
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>)}
+    </Field>
+  );
+}
+export function TextArea({ label, value, onChange, error }: { label: string; value: string; onChange: (v: string) => void; error?: string }) {
+  return <Field label={label} error={error}>{(id, d) => <textarea id={id} aria-describedby={d} rows={3} className="field-input" value={value} onChange={(e) => onChange(e.target.value)} />}</Field>;
+}
+export function Check({ label, checked, onChange, help }: { label: string; checked: boolean; onChange: (v: boolean) => void; help?: string }) {
+  return (
+    <label className="flex min-h-[40px] cursor-pointer items-start gap-3 rounded-xl border border-line bg-white px-3 py-2 text-sm hover:bg-primary-bg">
+      <input type="checkbox" className="mt-1 h-4 w-4 accent-[#187a75]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span><span className="font-medium text-ink">{label}</span>{help && <span className="block text-xs text-ink-2">{help}</span>}</span>
+    </label>
   );
 }
 
-export function Tabs({ tabs, value, onChange }: { tabs: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) {
-  return (
-    <div role="tablist" aria-label="Bagian halaman" className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
-      {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={value === t.id} onClick={() => onChange(t.id)}
-          className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-semibold ${value === t.id ? "border-brand-deep text-brand-deep" : "border-transparent text-muted hover:text-ink"}`}>
-          {t.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const tid = useId();
+  const prev = useRef<Element | null>(null);
   useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>("input,select,textarea,button")?.focus();
-    const onKey = (e: KeyboardEvent) => {
+    if (!open) return;
+    prev.current = document.activeElement;
+    const el = ref.current;
+    el?.querySelector<HTMLElement>("input,select,textarea,button")?.focus();
+    const key = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "Tab" && ref.current) {
-        const f = ref.current.querySelectorAll<HTMLElement>("input,select,textarea,button,a[href]");
+      if (e.key === "Tab" && el) {
+        const f = [...el.querySelectorAll<HTMLElement>("a[href],button:not(:disabled),input:not(:disabled),select,textarea")];
         if (!f.length) return;
         const first = f[0], last = f[f.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("keydown", onKey); prev?.focus(); };
-  }, [onClose]);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); (prev.current as HTMLElement | null)?.focus?.(); };
+  }, [open, onClose]);
+  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={tid} className={`fade-in card max-h-[92vh] w-full overflow-y-auto rounded-b-none p-5 sm:rounded-b-xl ${wide ? "max-w-3xl" : "max-w-lg"}`}>
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <h2 id={tid} className="text-lg font-semibold">{title}</h2>
-          <button className="btn btn-secondary btn-sm" onClick={onClose} aria-label="Tutup dialog">✕</button>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(32,51,50,0.45)] p-0 sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-[22px] bg-white p-5 shadow-pop sm:rounded-[22px] ${wide ? "sm:max-w-3xl" : "sm:max-w-lg"}`}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-ink">{title}</h2>
+          <button aria-label="Tutup" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-lg text-xl text-ink-2 hover:bg-primary-bg">×</button>
         </div>
         {children}
       </div>
@@ -248,71 +164,53 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
-/* ───────── Declarative form ───────── */
-export type FField = { key: string; label: string; type?: "text" | "number" | "date" | "datetime-local" | "select" | "textarea" | "checkbox" | "email"; options?: (string | { value: string; label: string })[]; required?: boolean; hint?: string; def?: string | boolean };
-
-export function FormModal({ title, fields, onSubmit, onClose, submitLabel = "Simpan", wide }: { title: string; fields: FField[]; onSubmit: (v: Record<string, string | boolean>) => Promise<void>; onClose: () => void; submitLabel?: string; wide?: boolean }) {
-  const [v, setV] = useState<Record<string, string | boolean>>(() => Object.fromEntries(fields.map((f) => [f.key, f.def ?? (f.type === "checkbox" ? false : "")])));
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const idp = useId();
+export function Tabs({ tabs, value, onChange }: { tabs: { key: string; label: string }[]; value: string; onChange: (k: string) => void }) {
   return (
-    <Modal title={title} onClose={onClose} wide={wide}>
-      <form onSubmit={async (e) => { e.preventDefault(); setBusy(true); setErr(null); try { await onSubmit(v); onClose(); } catch (x) { setErr(errText(x)); } finally { setBusy(false); } }} className="space-y-3">
-        {err && <ErrorBox message={err} />}
-        <div className={`grid gap-3 ${wide ? "sm:grid-cols-2" : ""}`}>
-          {fields.map((f) => {
-            const id = `${idp}-${f.key}`;
-            return (
-              <Field key={f.key} label={f.label + (f.required ? " *" : "")} hint={f.hint} htmlFor={id}>
-                {f.type === "select" ? (
-                  <select id={id} className="input" required={f.required} value={String(v[f.key])} onChange={(e) => setV({ ...v, [f.key]: e.target.value })}>
-                    <option value="">– pilih –</option>
-                    {f.options?.map((o) => typeof o === "string" ? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                ) : f.type === "textarea" ? (
-                  <textarea id={id} className="input" required={f.required} value={String(v[f.key])} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />
-                ) : f.type === "checkbox" ? (
-                  <input id={id} type="checkbox" className="h-5 w-5" checked={!!v[f.key]} onChange={(e) => setV({ ...v, [f.key]: e.target.checked })} />
-                ) : (
-                  <input id={id} className="input" type={f.type ?? "text"} step={f.type === "number" ? "any" : undefined} required={f.required} value={String(v[f.key])} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />
-                )}
-              </Field>
-            );
-          })}
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Btn variant="secondary" onClick={onClose}>Batal</Btn>
-          <button className="btn btn-primary" disabled={busy}>{busy ? "Menyimpan…" : submitLabel}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-/** Run an async action with toast feedback; returns true on success. */
-export function useAction() {
-  const toast = useToast();
-  return useCallback(async (fn: () => Promise<unknown>, okMsg = "Berhasil disimpan") => {
-    try { await fn(); toast(okMsg); return true; } catch (e) { toast(errText(e), "bad"); return false; }
-  }, [toast]);
-}
-
-export function Help({ children }: { children: ReactNode }) {
-  return (
-    <details className="mb-4 rounded-lg border border-line bg-cream px-4 py-2 text-sm">
-      <summary className="cursor-pointer font-semibold">Bantuan singkat</summary>
-      <div className="mt-2 space-y-1 text-muted">{children}</div>
-    </details>
-  );
-}
-
-export function Pager({ offset, limit, count, onChange }: { offset: number; limit: number; count: number; onChange: (o: number) => void }) {
-  return (
-    <div className="mt-3 flex items-center justify-between text-sm">
-      <Btn small variant="secondary" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>← Sebelumnya</Btn>
-      <span className="text-muted">Menampilkan {offset + 1}–{offset + count}</span>
-      <Btn small variant="secondary" disabled={count < limit} onClick={() => onChange(offset + limit)}>Berikutnya →</Btn>
+    <div role="tablist" className="mb-5 flex gap-1 overflow-x-auto border-b border-line">
+      {tabs.map((t) => (
+        <button key={t.key} role="tab" aria-selected={value === t.key} onClick={() => onChange(t.key)}
+          className={`-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold ${value === t.key ? "border-primary-deep text-primary-deep" : "border-transparent text-ink-2 hover:text-ink"}`}>
+          {t.label}
+        </button>
+      ))}
     </div>
+  );
+}
+
+export type Col<T = any> = { key: string; label: string; right?: boolean; render?: (row: T) => ReactNode };
+export function DataTable<T extends Record<string, any>>({ columns, rows, empty, caption }: { columns: Col<T>[]; rows: T[]; empty?: ReactNode; caption?: string }) {
+  if (!rows.length) return <>{empty ?? <Empty title="Belum ada data" />}</>;
+  return (
+    <div className="table-wrap">
+      <table>
+        {caption && <caption className="sr-only">{caption}</caption>}
+        <thead><tr>{columns.map((c) => <th key={c.key} scope="col" className={c.right ? "r" : ""}>{c.label}</th>)}</tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={(r.id as string) ?? i}>{columns.map((c) => <td key={c.key} className={c.right ? "r" : ""}>{c.render ? c.render(r) : (r[c.key] ?? "—")}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+export function Toaster() {
+  const items = useToasts();
+  return (
+    <div aria-live="polite" className="pointer-events-none fixed bottom-4 right-4 z-[60] flex max-w-sm flex-col gap-2">
+      {items.map((t) => (
+        <div key={t.id} role="status" className={`pointer-events-auto rounded-xl px-4 py-3 text-sm font-medium shadow-pop ${t.tone === "ok" ? "bg-primary-deep text-white" : "bg-[#7F1D14] text-white"}`}>{t.text}</div>
+      ))}
+    </div>
+  );
+}
+
+export function Logo({ size = 36 }: { size?: number }) {
+  return (
+    <span className="inline-flex items-center gap-2.5">
+      <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
+        <rect width="40" height="40" rx="11" fill="#187a75" />
+        <path d="M10 27l7-8 5 4 8-11" stroke="#FFD23F" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        <circle cx="30" cy="12" r="2.6" fill="#EF6C4A" />
+      </svg>
+      <span className="text-[17px] font-bold tracking-tight text-ink">Business Flow</span>
+    </span>
   );
 }

@@ -1,48 +1,32 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getSessionUser } from "@/server/auth";
-import { TEMPLATES } from "@/server/templates";
+import { DbStatusScreen } from "@/components/db-status-screen";
+import { Logo } from "@/components/ui";
+import { getSessionState } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
-const MODULES = ["Dashboard & Personal", "Manajemen Bisnis", "Keuangan & Akuntansi", "Penjualan & POS", "Produk, Jasa & Persediaan (HPP)", "Pembelian & Pemasok", "Pelanggan / CRM", "Karyawan & HR", "Tugas & Tim", "Order, Booking & Reservasi", "Operasional Bisnis", "Pemasaran", "Proyek", "Aset & Dokumen", "Laporan & Analitik", "Akun, Keamanan & Administrasi", "Template 16 Jenis Usaha"];
-
-export default async function Home() {
-  const user = await getSessionUser();
-  if (user) redirect("/app");
+export default async function Welcome() {
+  const session = await getSessionState();
+  if (session.status === "db_error") {
+    return <DbStatusScreen reason={session.reason} />;
+  }
+  if (session.grant) redirect("/dashboard");
   return (
-    <main id="main">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5">
-        <span className="font-display text-2xl">Business <span className="text-brand-deep">Flow</span></span>
-        <nav className="flex gap-2" aria-label="Utama">
-          <Link className="btn btn-secondary" href="/login">Masuk</Link>
-          <Link className="btn btn-primary" href="/register">Mulai gratis</Link>
-        </nav>
-      </header>
-      <section className="mx-auto max-w-6xl px-4 pb-12 pt-8 sm:pt-16">
-        <h1 className="max-w-3xl font-display text-4xl leading-tight sm:text-6xl">Satu platform untuk seluruh alur bisnis Anda.</h1>
-        <p className="mt-5 max-w-2xl text-lg text-muted">Penjualan & kasir, stok dengan HPP, pembelian, keuangan double-entry, pelanggan, karyawan, proyek, dan laporan. Data tersimpan permanen di server, terpisah ketat per bisnis.</p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link className="btn btn-primary" href="/register">Buat bisnis Anda</Link>
-          <Link className="btn btn-secondary" href="/login">Saya sudah punya akun</Link>
+    <main className="grid min-h-screen place-items-center bg-surface px-4 py-10">
+      <div className="w-full max-w-xl rounded-[24px] border border-line bg-white p-8 shadow-pop sm:p-10">
+        <Logo size={44} />
+        <h1 className="mt-8 text-[30px] font-bold leading-tight text-ink sm:text-[34px]">Selamat Datang di Business Flow</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-ink-2">
+          Mari siapkan sistem pengelolaan bisnis yang sesuai kebutuhan usaha Anda. Kami akan membantu Anda memilih jenis usaha, melengkapi profil, dan menyiapkan sistem secara bertahap.
+        </p>
+        <div className="mt-8 grid gap-3">
+          <Link href="/onboarding" className="flex min-h-[48px] items-center justify-center rounded-xl bg-primary-deep px-5 text-[15px] font-semibold text-white hover:bg-[#136560]">Mulai Siapkan Bisnis</Link>
+          <Link href="/guide" className="flex min-h-[48px] items-center justify-center rounded-xl border border-line bg-white px-5 text-[15px] font-semibold text-ink hover:bg-primary-bg">Pelajari Cara Menggunakan Business Flow</Link>
+          <Link href="/pair" className="flex min-h-[48px] items-center justify-center rounded-xl px-5 text-[15px] font-semibold text-primary-deep hover:bg-primary-bg">Sambungkan Perangkat ke Bisnis yang Sudah Ada</Link>
         </div>
-      </section>
-      <section className="bg-cream py-12">
-        <div className="mx-auto max-w-6xl px-4">
-          <h2 className="text-2xl font-semibold">17 modul terintegrasi</h2>
-          <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {MODULES.map((m, i) => <li key={m} className="card flex items-center gap-3 p-4"><span className="grid h-8 w-8 place-items-center rounded-lg bg-brand-deep text-sm font-semibold text-white" aria-hidden="true">{i + 1}</span>{m}</li>)}
-          </ul>
-        </div>
-      </section>
-      <section className="mx-auto max-w-6xl px-4 py-12">
-        <h2 className="text-2xl font-semibold">16 template jenis usaha</h2>
-        <p className="mt-1 text-muted">Istilah, bagan akun, alur kerja, dan checklist disesuaikan. Tanpa data contoh — workspace Anda mulai bersih.</p>
-        <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {TEMPLATES.map((t) => <li key={t.key} className="card p-4"><p className="font-semibold">{t.name}</p><p className="mt-1 text-sm text-muted">{t.desc}</p></li>)}
-        </ul>
-      </section>
-      <footer className="border-t border-line py-6 text-center text-sm text-muted">Business Flow · Pencatatan pembayaran bersifat manual; tidak ada pemrosesan uang.</footer>
+        <p className="mt-8 text-xs text-ink-2">Tidak ada akun, email, atau kata sandi. Akses diberikan per perangkat dan dikunci dengan PIN.</p>
+      </div>
     </main>
   );
 }

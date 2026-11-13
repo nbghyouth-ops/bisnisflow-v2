@@ -1,2 +1,0 @@
-# Model keamanan
-CSRF: cek Origin + SameSite=Lax. CSP/XFO/nosniff/HSTS via next.config. SQL selalu terparameter (drizzle `sql`), sort allowlist. Rate limit PostgreSQL (IP, akun, user, workspace, upload, impor, undangan, pembuatan workspace) dengan housekeeping. Upload: allowlist ekstensi + signature + tolak konten aktif/makro + kuota; unduh `nosniff` + CSP sandbox. Log terstruktur tanpa rahasia. Audit log append-only (trigger + hak). Keterbatasan: tidak ada antivirus, MFA, SAST/DAST otomatis, pentest.
